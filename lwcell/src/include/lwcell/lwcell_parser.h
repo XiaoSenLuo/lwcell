@@ -69,6 +69,12 @@ uint8_t lwcelli_parse_cipstatus_conn(const char* str, uint8_t is_conn_line, uint
 
 uint8_t lwcelli_parse_ipd(const char* str);
 
+uint8_t lwcell_parse_sapbr(const char *str, int *s);
+
+uint8_t lwcell_parse_httpread(const char* str);
+
+uint8_t lwcell_parse_httpaction(const char *str, int *code, int *dl);
+
 #if defined(__cplusplus)
 }
 #endif /* defined(__cplusplus) */

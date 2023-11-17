@@ -72,7 +72,7 @@ lwcell_network_request_attach(void) {
     /* Check if we need to connect */
     lwcell_core_lock();
     if (network_counter == 0) {
-        if (!lwcell_network_is_attached()) {
+        if (!lwcell_network_is_attached(LWCELL_PDP_SOCKET)) {
             do_conn = 1;
         }
     }
@@ -83,7 +83,7 @@ lwcell_network_request_attach(void) {
 
     /* Connect to network */
     if (do_conn) {
-        res = lwcell_network_attach(network_apn, network_user, network_pass, NULL, NULL, 1);
+        res = lwcell_network_attach(LWCELL_PDP_SOCKET, network_apn, network_user, network_pass, NULL, NULL, 1);
         if (res == lwcellOK) {
             lwcell_core_lock();
             ++network_counter;
@@ -120,7 +120,7 @@ lwcell_network_request_detach(void) {
 
     /* Connect to network */
     if (do_disconn) {
-        res = lwcell_network_detach(NULL, NULL, 1);
+        res = lwcell_network_detach(LWCELL_PDP_SOCKET, NULL, NULL, 1);
         if (res == lwcellOK) {
             lwcell_core_lock();
             --network_counter;

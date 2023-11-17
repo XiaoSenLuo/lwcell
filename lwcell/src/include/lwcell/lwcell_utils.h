@@ -118,6 +118,14 @@ extern "C" {
  */
 #define LWCELL_UNUSED(x)                   ((void)(x))
 
+#define LWCELL_BIT(b)                      (1UL << (b))
+
+#define LWCELL_BIT_SET(x, b)               (((x)) |= (b))
+
+#define LWCELL_BIT_CLEAR(x, b)             (((x)) &= (~(b)))
+
+#define LWCELL_BIT_VALUE(x, b)             ((((x)) & (b)) ? 1 : 0)
+
 /**
  * \brief           Get input value casted to `unsigned 32-bit` value
  * \param[in]       x: Input value

@@ -35,6 +35,7 @@
 #define LWCELL_HTTP_HDR_H
 
 #include "lwcell/lwcell_types.h"
+#include "lwcell/lwcell_netconn.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +50,42 @@ extern "C" {
  * Currently it is under development
  *
  */
+
+
+typedef struct lwcell_netconn* lwcell_httpconn_p;
+
+
+#define LWCELL_HTTP_RECEIVE_NO_WAIT 0xFFFFFFFF
+
+#define LWCELL_NETCONN_FLAG_FLUSH      ((uint16_t)0x0001) /*!< Immediate flush after netconn write */
+
+
+
+typedef enum {
+    LWCELL_HTTPCONN_TYPE_HTTP = LWCELL_CONN_TYPE_HTTP,
+    LWCELL_HTTPCONN_TYPE_HTTPS = LWCELL_CONN_TYPE_HTTPS,
+}lwcell_httpconn_type_t;
+
+
+lwcellr_t lwcell_http_request_attach(void);
+lwcellr_t lwcell_http_request_detach(void);
+
+
+lwcell_httpconn_p lwcell_http_new(lwcell_httpconn_type_t type);
+lwcellr_t lwcell_http_delete(lwcell_httpconn_p nc);
+lwcellr_t lwcell_http_connect(lwcell_httpconn_p nc, const char* host, lwcell_port_t port);
+lwcellr_t lwcell_http_receive(lwcell_httpconn_p nc, lwcell_pbuf_p* pbuf);
+lwcellr_t lwcell_http_close(lwcell_httpconn_p nc);
+int8_t lwcell_http_getconnnum(lwcell_httpconn_p nc);
+void lwcell_http_set_receive_timeout(lwcell_httpconn_p nc, uint32_t timeout);
+uint32_t lwcell_http_get_receive_timeout(lwcell_httpconn_p nc);
+
+
+lwcellr_t lwcell_http_write(lwcell_httpconn_p nc, const void* data, size_t btw);
+lwcellr_t lwcell_http_write_ex(lwcell_httpconn_p nc, const void* data, size_t btw, uint16_t flags);
+lwcellr_t lwcell_http_flush(lwcell_httpconn_p nc);
+
+
 
 /**
  * \}

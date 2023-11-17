@@ -1140,7 +1140,7 @@ lwcell_mqtt_client_connect(lwcell_mqtt_client_p client, const char* host, lwcell
     LWCELL_ASSERT(info != NULL);
 
     lwcell_core_lock();
-    if (lwcell_network_is_attached() && client->conn_state == LWCELL_MQTT_CONN_DISCONNECTED) {
+    if (lwcell_network_is_attached(LWCELL_PDP_SOCKET) && client->conn_state == LWCELL_MQTT_CONN_DISCONNECTED) {
         client->info = info; /* Save client info parameters */
         client->evt_fn = evt_fn != NULL ? evt_fn : prv_mqtt_evt_fn_default;
 

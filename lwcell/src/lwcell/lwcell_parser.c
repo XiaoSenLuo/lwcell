@@ -332,8 +332,8 @@ lwcelli_parse_creg(const char* str, uint8_t skip_first) {
         /* Notify user in case we are not able to add new command to queue */
         lwcell_operator_get(&lwcell.m.network.curr_operator, NULL, NULL, 0);
 #if LWCELL_CFG_NETWORK
-    } else if (lwcell_network_is_attached()) {
-        lwcell_network_check_status(NULL, NULL, 0); /* Do the update */
+    } else if (lwcell_network_is_attached(LWCELL_PDP_SOCKET)) {
+        lwcell_network_check_status(LWCELL_PDP_SOCKET, NULL, NULL, 0); /* Do the update */
 #endif                                              /* LWCELL_CFG_NETWORK */
     }
 
@@ -878,6 +878,7 @@ lwcelli_parse_cipstatus_conn(const char* str, uint8_t is_conn_line, uint8_t* con
     lwcell_conn_t* conn;
     char s_tmp[16];
     uint8_t tmp_pdp_state;
+    int pdp_type = LWCELL_PDP_SOCKET;
 
     *continueScan = 1;
     if (is_conn_line && (*str == 'C' || *str == 'S')) {
@@ -894,11 +895,12 @@ lwcelli_parse_cipstatus_conn(const char* str, uint8_t is_conn_line, uint8_t* con
         }
 
         /* Check if we have to update status for application */
-        if (lwcell.m.network.is_attached != tmp_pdp_state) {
-            lwcell.m.network.is_attached = tmp_pdp_state;
+        if (LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type)) != tmp_pdp_state) {
+            if(tmp_pdp_state == 0) LWCELL_BIT_CLEAR(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type));
+            else LWCELL_BIT_SET(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type));
 
             /* Notify upper layer */
-            lwcelli_send_cb(lwcell.m.network.is_attached ? LWCELL_EVT_NETWORK_ATTACHED : LWCELL_EVT_NETWORK_DETACHED);
+            lwcelli_send_cb(LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type)) ? LWCELL_EVT_NETWORK_ATTACHED : LWCELL_EVT_NETWORK_DETACHED);
         }
 
         return 1;
@@ -978,6 +980,170 @@ lwcelli_parse_ipd(const char* str) {
     lwcell.m.ipd.tot_len = len; /* Total number of bytes in this received packet */
     lwcell.m.ipd.rem_len = len; /* Number of remaining bytes to read */
     lwcell.m.ipd.conn = c;      /* Pointer to connection we have data for */
+
+    return 1;
+}
+
+/**
+ * \brief              Parse SAPBR statements
+ * \param[in]          str: Input string
+ * \param[in]          cmd: SAPBR command type
+ * \return             `1` on success, `0` otherwise
+ */
+uint8_t lwcell_parse_sapbr(const char *str, int *s) {
+    int8_t cid = 0;
+    lwcell_sapbr_status_t status = 0;
+    lwcell_ip_t ip = {127, 0, 0, 1};
+    uint8_t tmp_state = 0;
+    int pdp_type = LWCELL_PDP_APP_PROTOCOL;
+
+    if(*str == '+'){
+        str += 6;
+    }
+    if(*str == ' '){
+        ++str;
+    }
+    if(*str == ':'){
+        ++str;
+    }
+    if(*str == ' '){
+        ++str;
+    }
+
+    /// 移动场景被动去激活, 可能原因: SIM卡或者天线被拔掉, 进入无信号区域
+    if(!strncmp(str, "DEACT", 5)){
+        ///
+        cid = lwcelli_parse_number(&str);
+        tmp_state = 0;
+        if(s) *s = LWCELL_EVT_NETWORK_DETACHED;
+        LWCELL_MSG_VAR_DEFINE(msg);
+
+        LWCELL_MSG_VAR_ALLOC(msg, 0);
+        LWCELL_MSG_VAR_SET_EVT(msg, NULL, NULL);
+        LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_SAPBR_QUERY;
+        lwcelli_send_msg_to_producer_mbox(&LWCELL_MSG_VAR_REF(msg), lwcelli_initiate_cmd, 10000);
+
+        if(tmp_state != LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type))){
+            LWCELL_BIT_CLEAR(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type));
+            notify_upper_layer:
+            lwcelli_send_cb(LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type)) ? LWCELL_EVT_NETWORK_ATTACHED : LWCELL_EVT_NETWORK_DETACHED);
+        }
+    }else{
+        if(CMD_IS_CUR(LWCELL_CMD_SAPBR_QUERY)){
+            cid = lwcelli_parse_number(&str);
+            status = (lwcell_sapbr_status_t)lwcelli_parse_number(&str);
+            if(s) *s = status;
+            if(status == LWCELL_SAPBR_STATUS_CONNECTED){
+                tmp_state = 1;
+                lwcelli_parse_ip(&str, &ip);
+                lwcell.msg->msg.network_attach.pdp.id = cid;
+                LWCELL_MEMCPY(&lwcell.msg->msg.network_attach.pdp.ip, &ip, sizeof(ip));
+                if(tmp_state != LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type))){
+                    LWCELL_BIT_SET(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type));
+                    lwcelli_send_cb(LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type)) ? LWCELL_EVT_NETWORK_ATTACHED : LWCELL_EVT_NETWORK_DETACHED);
+                }
+            }else if(status == LWCELL_SAPBR_STATUS_CLOSED){
+                LWCELL_BIT_CLEAR(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type));
+                /// TODO: 关闭HTTP, MQTT 连接
+                tmp_state = 0;
+                int cm = LWCELL_CFG_HTTP_CONN_OFFSET + LWCELL_CFG_MAX_HTTP_CONNS;
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP
+                for(int i = LWCELL_CFG_HTTP_CONN_OFFSET; i < cm; i++){
+                    lwcelli_conn_closed_process(i, 1);
+                }
+#endif
+#if LWCELL_CFG_MQTT
+                LWCELL_MSG_VAR_DEFINE(mc_msg);
+
+                LWCELL_MSG_VAR_ALLOC(mc_msg, 0);
+                LWCELL_MSG_VAR_SET_EVT(mc_msg, NULL, NULL);
+                LWCELL_MSG_VAR_REF(mc_msg).cmd_def = LWCELL_CMD_SAPBR_QUERY;
+                lwcelli_send_msg_to_producer_mbox(&LWCELL_MSG_VAR_REF(mc_msg), lwcelli_initiate_cmd, 60000);
+                cm = LWCELL_CFG_MQTT_CONN_OFFSET + LWCELL_CFG_MAX_MQTT_CONNS;
+                for(int i = LWCELL_CFG_MQTT_CONN_OFFSET; i < cm; i++){
+                    lwcelli_conn_closed_process(i, 1);
+                }
+#endif
+                if(tmp_state != LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type))){
+                    LWCELL_BIT_CLEAR(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type));
+                    lwcelli_send_cb(LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT(pdp_type)) ? LWCELL_EVT_NETWORK_ATTACHED : LWCELL_EVT_NETWORK_DETACHED);
+                }
+            }
+#endif
+        }
+    }
+    return 1;
+}
+
+uint8_t lwcell_parse_httpread(const char* str){
+    size_t len;
+    lwcell_conn_p c;
+
+    if (*str == '+') {
+        str += 9;
+    }
+    if(*str == ':'){
+        str++;
+    }
+
+    len = lwcelli_parse_number(&str);
+
+    c = &lwcell.m.conns[LWCELL_CFG_HTTP_CONN_OFFSET];
+
+    if(c == NULL){
+        return 0;
+    }
+
+    lwcell.m.ipd.read = 1;      /* Start reading network data */
+    lwcell.m.ipd.tot_len = len; /* Total number of bytes in this received packet */
+    lwcell.m.ipd.rem_len = len; /* Number of remaining bytes to read */
+    lwcell.m.ipd.conn = c;      /* Pointer to connection we have data for */
+
+    return 1;
+}
+
+uint8_t lwcell_parse_httpaction(const char *str, int *code, int *dl) {
+    uint8_t method = 0;
+    int32_t d_len = 0;
+    int status = 0;
+
+    if(*str == '+'){
+        str += 11;
+    }
+    if(*str == ':'){
+        str++;
+    }
+    if(*str == ' '){
+        str++;
+    }
+
+    method = lwcelli_parse_number(&str);
+    status = lwcelli_parse_number(&str);
+    d_len = lwcelli_parse_number(&str);
+    int cm = LWCELL_CFG_HTTP_CONN_OFFSET + LWCELL_CFG_MAX_HTTP_CONNS;
+    lwcell_conn_t *conn = &lwcell.m.conns[cm - lwcell.msg->msg.conn_start.num - 1];
+    conn->http_code = status;
+    if(code) *code = status;
+    if(dl) *dl = d_len;
+    if(status == 200){
+        conn->status.f.client = 1;
+        conn->status.f.active = 1;
+        conn->type = lwcell.msg->msg.conn_start.type;
+        conn->evt_func = lwcell.msg->msg.conn_start.evt_func;
+        conn->arg = lwcell.msg->msg.conn_start.arg;
+        conn->type = lwcell.msg->msg.conn_start.type;
+        conn->http_method = method;
+        if (method == LWCELL_HTTP_METHOD_GET) {
+
+        } else if (method == LWCELL_HTTP_METHOD_POST) {
+
+        } else if (method == LWCELL_HTTP_METHOD_HEAD) {
+
+        }
+    }else{
+
+    }
 
     return 1;
 }

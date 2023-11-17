@@ -198,6 +198,17 @@ lwcell_conn_start(lwcell_conn_p* conn, lwcell_conn_type_t type, const char* cons
     LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_CIPSTART;
     LWCELL_MSG_VAR_REF(msg).cmd = LWCELL_CMD_CIPSTATUS;
     LWCELL_MSG_VAR_REF(msg).msg.conn_start.num = LWCELL_CFG_MAX_CONNS; /* Set maximal value as invalid number */
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP
+    if((type == LWCELL_CONN_TYPE_HTTP) || (type == LWCELL_CONN_TYPE_HTTPS)){
+        LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_HTTPINIT,
+        LWCELL_MSG_VAR_REF(msg).cmd = LWCELL_CMD_SAPBR_QUERY;
+        LWCELL_MSG_VAR_REF(msg).msg.conn_start.num = LWCELL_CFG_HTTP_CONN_OFFSET + LWCELL_CFG_MAX_HTTP_CONNS; /* Set maximal value as invalid number */
+    }
+#endif
+#if LWCELL_CFG_MQTT
+#endif
+#endif
     LWCELL_MSG_VAR_REF(msg).msg.conn_start.conn = conn;
     LWCELL_MSG_VAR_REF(msg).msg.conn_start.type = type;
     LWCELL_MSG_VAR_REF(msg).msg.conn_start.host = host;
@@ -226,6 +237,16 @@ lwcell_conn_close(lwcell_conn_p conn, const uint32_t blocking) {
     /* Proceed with close event at this point! */
     LWCELL_MSG_VAR_ALLOC(msg, blocking);
     LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_CIPCLOSE;
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP
+    if((conn->type == LWCELL_CONN_TYPE_HTTP) || (conn->type == LWCELL_CONN_TYPE_HTTPS)){
+        LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_HTTPTERM;
+    }
+#endif
+#if LWCELL_CFG_MQTT
+
+#endif
+#endif
     LWCELL_MSG_VAR_REF(msg).msg.conn_close.conn = conn;
     LWCELL_MSG_VAR_REF(msg).msg.conn_close.val_id = lwcelli_conn_get_val_id(conn);
 

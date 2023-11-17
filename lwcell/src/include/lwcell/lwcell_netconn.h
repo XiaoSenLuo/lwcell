@@ -70,6 +70,9 @@ typedef enum {
     LWCELL_NETCONN_TYPE_TCP = LWCELL_CONN_TYPE_TCP, /*!< TCP connection */
     LWCELL_NETCONN_TYPE_UDP = LWCELL_CONN_TYPE_UDP, /*!< UDP connection */
     LWCELL_NETCONN_TYPE_SSL = LWCELL_CONN_TYPE_SSL, /*!< TCP connection over SSL */
+    LWCELL_NETCONN_TYPE_HTTP = LWCELL_CONN_TYPE_HTTP,
+    LWCELL_NETCONN_TYPE_HTTPS = LWCELL_CONN_TYPE_HTTPS,
+    LWCELL_NETCONN_TYPE_MQTT = LWCELL_CONN_TYPE_MQTT
 } lwcell_netconn_type_t;
 
 lwcell_netconn_p lwcell_netconn_new(lwcell_netconn_type_t type);

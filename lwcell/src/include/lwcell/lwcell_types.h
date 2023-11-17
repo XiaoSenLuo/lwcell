@@ -102,8 +102,8 @@ typedef enum {
  * \brief           SIM state
  */
 typedef enum {
-    LWCELL_SIM_STATE_NOT_INSERTED, /*!< SIM is not inserted in socket */
     LWCELL_SIM_STATE_READY,        /*!< SIM is ready for operations */
+    LWCELL_SIM_STATE_NOT_INSERTED, /*!< SIM is not inserted in socket */
     LWCELL_SIM_STATE_NOT_READY,    /*!< SIM is not ready for any operation */
     LWCELL_SIM_STATE_PIN,          /*!< SIM is waiting for SIM to be given */
     LWCELL_SIM_STATE_PUK,          /*!< SIM is waiting for PUT to be given */
@@ -142,6 +142,9 @@ typedef enum {
     LWCELL_CONN_TYPE_TCP, /*!< Connection type is TCP */
     LWCELL_CONN_TYPE_UDP, /*!< Connection type is UDP */
     LWCELL_CONN_TYPE_SSL, /*!< Connection type is TCP over SSL */
+    LWCELL_CONN_TYPE_HTTP,
+    LWCELL_CONN_TYPE_HTTPS,
+    LWCELL_CONN_TYPE_MQTT,
 } lwcell_conn_type_t;
 
 /**
@@ -280,6 +283,29 @@ typedef enum {
     LWCELL_NETWORK_REG_STATUS_CONNECTED_SMS_ONLY = 0x06, /*!< Device is connected to home network in SMS-only mode */
     LWCELL_NETWORK_REG_STATUS_CONNECTED_ROAMING_SMS_ONLY = 0x07 /*!< Device is roaming in SMS-only mode */
 } lwcell_network_reg_status_t;
+
+typedef enum {
+    LWCELL_SAPBR_STATUS_CONNECTING = 0,
+    LWCELL_SAPBR_STATUS_CONNECTED,
+    LWCELL_SAPBR_STATUS_CLOSING,
+    LWCELL_SAPBR_STATUS_CLOSED
+}lwcell_sapbr_status_t;
+
+#if LWCELL_CFG_PROTOCOL
+
+typedef enum {
+    LWCELL_PDP_SOCKET = 0,
+    LWCELL_PDP_APP_PROTOCOL = 1
+}lwcell_pdp_type;
+
+#if LWCELL_CFG_HTTP
+typedef enum {
+    LWCELL_HTTP_METHOD_GET = 0,
+    LWCELL_HTTP_METHOD_POST = 1,
+    LWCELL_HTTP_METHOD_HEAD = 2,
+}lwcell_http_method_t;
+#endif
+#endif
 
 /**
  * \ingroup         LWCELL_CALL

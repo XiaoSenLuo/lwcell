@@ -254,10 +254,10 @@
  *                  Called with format and optional parameters for printf style debug
  */
 #ifndef LWCELL_CFG_DBG_OUT
-#define LWCELL_CFG_DBG_OUT(fmt, ...)                                                                                    \
-    do {                                                                                                               \
-        extern int printf(const char* format, ...);                                                                    \
-        printf(fmt, ##__VA_ARGS__);                                                                                    \
+#define LWCELL_CFG_DBG_OUT(fmt, ...)      \
+    do {                                \
+        extern int printf_(const char* format, ...);   \
+        printf_("%s:""%d:"fmt, __FILE__, __LINE__, ##__VA_ARGS__);   \
     } while (0)
 #endif
 

@@ -52,7 +52,7 @@ set(lwcell_include_DIRS
     
 # Add system port to core if user defined
 if (DEFINED LWCELL_SYS_PORT)
-    set(lwcell_core_SRCS ${lwcell_core_SRCS} ${CMAKE_CURRENT_LIST_DIR}/src/system/lwcell_sys_${LWCELL_SYS_PORT}.c)
+    set(lwcell_core_SRCS ${lwcell_core_SRCS} ${CMAKE_CURRENT_LIST_DIR}/src/system/lwcell_sys_${LWCELL_SYS_PORT}.c ${CMAKE_CURRENT_LIST_DIR}/src/system/lwcell_mem_${LWCELL_SYS_PORT}.c)
     set(lwcell_include_DIRS ${lwcell_include_DIRS} ${CMAKE_CURRENT_LIST_DIR}/src/include/system/port/${LWCELL_SYS_PORT})
 endif()
 

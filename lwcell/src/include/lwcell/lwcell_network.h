@@ -53,12 +53,14 @@ lwcellr_t lwcell_network_rssi(int16_t* rssi, const lwcell_api_cmd_evt_fn evt_fn,
 lwcell_network_reg_status_t lwcell_network_get_reg_status(void);
 
 /* TCP/IP related commands */
-lwcellr_t lwcell_network_attach(const char* apn, const char* user, const char* pass, const lwcell_api_cmd_evt_fn evt_fn,
-                              void* const evt_arg, const uint32_t blocking);
-lwcellr_t lwcell_network_detach(const lwcell_api_cmd_evt_fn evt_fn, void* const evt_arg, const uint32_t blocking);
-uint8_t lwcell_network_is_attached(void);
+lwcellr_t lwcell_network_attach (lwcell_pdp_type type, const char *apn, const char *user, const char *pass,
+                                 const lwcell_api_cmd_evt_fn evt_fn, void *const evt_arg, const uint32_t blocking);
+lwcellr_t lwcell_network_detach (lwcell_pdp_type type, const lwcell_api_cmd_evt_fn evt_fn, void *const evt_arg,
+                                 const uint32_t blocking);
+uint8_t lwcell_network_is_attached (lwcell_pdp_type type);
 lwcellr_t lwcell_network_copy_ip(lwcell_ip_t* ip);
-lwcellr_t lwcell_network_check_status(const lwcell_api_cmd_evt_fn evt_fn, void* const evt_arg, const uint32_t blocking);
+lwcellr_t lwcell_network_check_status (lwcell_pdp_type type, const lwcell_api_cmd_evt_fn evt_fn, void *const evt_arg,
+                                       const uint32_t blocking);
 
 /**
  * \}

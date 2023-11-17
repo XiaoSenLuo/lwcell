@@ -47,16 +47,20 @@
  * \return          \ref lwcellOK on success, member of \ref lwcellr_t enumeration otherwise
  */
 lwcellr_t
-lwcell_network_attach(const char* apn, const char* user, const char* pass, const lwcell_api_cmd_evt_fn evt_fn,
-                      void* const evt_arg, const uint32_t blocking) {
+lwcell_network_attach (lwcell_pdp_type type, const char *apn, const char *user, const char *pass,
+                       const lwcell_api_cmd_evt_fn evt_fn, void *const evt_arg, const uint32_t blocking) {
     LWCELL_MSG_VAR_DEFINE(msg);
 
     LWCELL_MSG_VAR_ALLOC(msg, blocking);
     LWCELL_MSG_VAR_SET_EVT(msg, evt_fn, evt_arg);
     LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_NETWORK_ATTACH;
+    LWCELL_MSG_VAR_REF(msg).msg.network_attach.pdp.type = type;
 #if LWCELL_CFG_CONN
     LWCELL_MSG_VAR_REF(msg).cmd = LWCELL_CMD_CIPSTATUS;
 #endif /* LWCELL_CFG_CONN */
+#if LWCELL_CFG_HTTP
+    if(type == LWCELL_PDP_APP_PROTOCOL) LWCELL_MSG_VAR_REF(msg).cmd = LWCELL_CMD_CPIN_GET;
+#endif
     LWCELL_MSG_VAR_REF(msg).msg.network_attach.apn = apn;
     LWCELL_MSG_VAR_REF(msg).msg.network_attach.user = user;
     LWCELL_MSG_VAR_REF(msg).msg.network_attach.pass = pass;
@@ -72,14 +76,21 @@ lwcell_network_attach(const char* apn, const char* user, const char* pass, const
  * \return          \ref lwcellOK on success, member of \ref lwcellr_t enumeration otherwise
  */
 lwcellr_t
-lwcell_network_detach(const lwcell_api_cmd_evt_fn evt_fn, void* const evt_arg, const uint32_t blocking) {
+lwcell_network_detach (lwcell_pdp_type type, const lwcell_api_cmd_evt_fn evt_fn, void *const evt_arg,
+                       const uint32_t blocking) {
     LWCELL_MSG_VAR_DEFINE(msg);
 
     LWCELL_MSG_VAR_ALLOC(msg, blocking);
     LWCELL_MSG_VAR_SET_EVT(msg, evt_fn, evt_arg);
     LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_NETWORK_DETACH;
+    LWCELL_MSG_VAR_REF(msg).msg.network_attach.pdp.type = type;
 #if LWCELL_CFG_CONN
     /* LWCELL_MSG_VAR_REF(msg).cmd = LWCELL_CMD_CIPSTATUS; */
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP || LWCELL_CFG_MQTT
+    if(type == LWCELL_PDP_APP_PROTOCOL) LWCELL_MSG_VAR_REF(msg).cmd = LWCELL_CMD_SAPBR_CLOSE;
+#endif
+#endif
 #endif /* LWCELL_CFG_CONN */
 
     return lwcelli_send_msg_to_producer_mbox(&LWCELL_MSG_VAR_REF(msg), lwcelli_initiate_cmd, 60000);
@@ -93,12 +104,17 @@ lwcell_network_detach(const lwcell_api_cmd_evt_fn evt_fn, void* const evt_arg, c
  * \return          \ref lwcellOK on success, member of \ref lwcellr_t enumeration otherwise
  */
 lwcellr_t
-lwcell_network_check_status(const lwcell_api_cmd_evt_fn evt_fn, void* const evt_arg, const uint32_t blocking) {
+lwcell_network_check_status (lwcell_pdp_type type, const lwcell_api_cmd_evt_fn evt_fn, void *const evt_arg,
+                             const uint32_t blocking) {
     LWCELL_MSG_VAR_DEFINE(msg);
 
     LWCELL_MSG_VAR_ALLOC(msg, blocking);
     LWCELL_MSG_VAR_SET_EVT(msg, evt_fn, evt_arg);
     LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_CIPSTATUS;
+
+    if (type == LWCELL_PDP_APP_PROTOCOL) {
+        LWCELL_MSG_VAR_REF(msg).cmd_def = LWCELL_CMD_SAPBR_QUERY;
+    }
 
     return lwcelli_send_msg_to_producer_mbox(&LWCELL_MSG_VAR_REF(msg), lwcelli_initiate_cmd, 60000);
 }
@@ -110,7 +126,7 @@ lwcell_network_check_status(const lwcell_api_cmd_evt_fn evt_fn, void* const evt_
  */
 lwcellr_t
 lwcell_network_copy_ip(lwcell_ip_t* ip) {
-    if (lwcell_network_is_attached()) {
+    if (lwcell_network_is_attached(LWCELL_PDP_SOCKET)) {
         lwcell_core_lock();
         LWCELL_MEMCPY(ip, &lwcell.m.network.ip_addr, sizeof(*ip));
         lwcell_core_unlock();
@@ -124,10 +140,10 @@ lwcell_network_copy_ip(lwcell_ip_t* ip) {
  * \return          `1` on success, `0` otherwise
  */
 uint8_t
-lwcell_network_is_attached(void) {
+lwcell_network_is_attached (lwcell_pdp_type type) {
     uint8_t res;
     lwcell_core_lock();
-    res = LWCELL_U8(lwcell.m.network.is_attached);
+    res = LWCELL_U8(LWCELL_BIT_VALUE(lwcell.m.network.is_attached, LWCELL_BIT((int)type)));
     lwcell_core_unlock();
     return res;
 }

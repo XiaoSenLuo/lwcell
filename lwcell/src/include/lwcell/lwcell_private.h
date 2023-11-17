@@ -80,6 +80,9 @@ typedef enum {
     LWCELL_CMD_CIPRXGET_SET,
     LWCELL_CMD_CSTT_SET,
 
+    LWCELL_CMD_CCID_GET,
+    LWCELL_CMD_ICCID_GET,
+
     /* AT commands according to the V.25TER */
     LWCELL_CMD_CALL_ENABLE,
     LWCELL_CMD_A,       /*!< Re-issues the Last Command Given */
@@ -256,6 +259,40 @@ typedef enum {
     LWCELL_CMD_CSMP,         /*!< Set SMS Text Mode Parameters */
     LWCELL_CMD_CSMS,         /*!< Select Message Service */
 
+    LWCELL_CMD_SAPBR,        /*!< Bearer Settings for Applications Based on IP */
+    LWCELL_CMD_SAPBR_CLOSE,
+    LWCELL_CMD_SAPBR_OPEN,
+    LWCELL_CMD_SAPBR_CONTYPE_GPRS_SET,
+    LWCELL_CMD_SAPBR_APN_SET,
+    LWCELL_CMD_SAPBR_QUERY,
+    LWCELL_CMD_SAPBR_GET,
+
+    LWCELL_CMD_HTTP_ENABLE,
+    LWCELL_CMD_HTTPINIT,
+    LWCELL_CMD_HTTPSSL_SET_0,
+    LWCELL_CMD_HTTPSSL_SET_1,
+    LWCELL_CMD_HTTPPARA_CID,
+    LWCELL_CMD_HTTPPARA_URL,
+    LWCELL_CMD_HTTPPARA_UA,
+    LWCELL_CMD_HTTPPARA_PROIP,
+    LWCELL_CMD_HTTPPARA_PROPORT,
+    LWCELL_CMD_HTTPPARA_REDIR,
+    LWCELL_CMD_HTTPPARA_BREAK,
+    LWCELL_CMD_HTTPPARA_BREAKEND,
+    LWCELL_CMD_HTTPPARA_USER_DEFINED,
+    LWCELL_CMD_HTTPPARA_USERDATA,
+    LWCELL_CMD_HTTPDATA,
+    LWCELL_CMD_HTTPACTION_GET,
+    LWCELL_CMD_HTTPACTION_POST,
+    LWCELL_CMD_HTTPACTION_HEAD,
+    LWCELL_CMD_HTTPREAD,
+    LWCELL_CMD_HTTPHEAD,
+    LWCELL_CMD_HTTPSCONT,
+    LWCELL_CMD_HTTPTERM,
+
+    LWCELL_CMD_MQTT_ENABLE,
+
+
     LWCELL_CMD_END, /*!< Last CMD entry */
 } lwcell_cmd_t;
 
@@ -264,6 +301,12 @@ typedef enum {
  */
 typedef struct lwcell_conn {
     lwcell_conn_type_t type;   /*!< Connection type */
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP
+    lwcell_http_method_t http_method;
+    int http_code;
+#endif
+#endif
     uint8_t num;              /*!< Connection number */
     lwcell_ip_t remote_ip;     /*!< Remote IP address */
     lwcell_port_t remote_port; /*!< Remote port number */
@@ -286,7 +329,7 @@ typedef struct lwcell_conn {
             uint8_t data_received : 1; /*!< Status whether first data were received on connection */
             uint8_t in_closing    : 1; /*!< Status if connection is in closing mode.
                                                     When in closing mode, ignore any possible received data from function */
-            uint8_t bearer        : 1; /*!< Bearer used. Can be `1` or `0` */
+            uint8_t bearer        : 2; /*!< Bearer used. Can be `1` or `0` */
         } f;                           /*!< Connection flags */
     } status;                          /*!< Connection status union with flag bits */
 } lwcell_conn_t;
@@ -447,7 +490,12 @@ typedef struct lwcell_msg {
             size_t* bw;                  /*!< Number of bytes written so far */
             uint8_t val_id;              /*!< Connection current validation ID when command was sent to queue */
         } conn_send;                     /*!< Structure to send data on connection */
+
+#if LWCELL_CFG_HTTP || __DOXYGEN__
+
+#endif
 #endif                                   /* LWCELL_CFG_CONN || __DOXYGEN__ */
+
 #if LWCELL_CFG_SMS || __DOXYGEN__
         struct {
             const char* num;  /*!< Phone number */
@@ -536,6 +584,11 @@ typedef struct lwcell_msg {
             const char* apn;  /*!< APN address */
             const char* user; /*!< APN username */
             const char* pass; /*!< APN password */
+            struct {
+                uint8_t type;
+                uint8_t id;
+                lwcell_ip_t ip;
+            } pdp;
         } network_attach;     /*!< Settings for network attach */
 #endif                        /* LWCELL_CFG_NETWORK || __DOXYGEN__ */
     } msg;                    /*!< Group of different possible message contents */
@@ -642,7 +695,9 @@ typedef struct {
     char model_manufacturer[20];  /*!< Device manufacturer */
     char model_number[20];        /*!< Device model number */
     char model_serial_number[20]; /*!< Device serial number */
-    char model_revision[20];      /*!< Device revision */
+    char model_revision[32];      /*!< Device revision */
+    char model_ccid[22];          /*!< Device CCID or ICCID */
+    char model_imsi[20];          /*!< Device IMSI */
     lwcell_device_model_t model;   /*!< Device model */
 
     /* Network&operator specific */
@@ -654,7 +709,18 @@ typedef struct {
 #if LWCELL_CFG_CONN || __DOXYGEN__
     uint8_t active_conns_cur_parse_num; /*!< Current connection number used for parsing */
 
-    lwcell_conn_t conns[LWCELL_CFG_MAX_CONNS]; /*!< Array of all connection structures */
+    struct {
+        lwcell_conn_t conns[LWCELL_CFG_MAX_CONNS]; /*!< Array of all connection structures */
+#if LWCELL_CFG_PROTOCOL || __DOXYGEN__
+#if LWCELL_CFG_HTTP || __DOXYGEN__
+        lwcell_conn_t http_conns[LWCELL_CFG_MAX_HTTP_CONNS];
+#endif
+#if LWCELL_CFG_MQTT || __DOXYGEN__
+    lwcell_conn_t mqtt_conns[LWCELL_CFG_MAX_MQTT_CONNS];
+#endif
+#endif
+    };
+
     lwcell_ipd_t ipd;                         /*!< Connection incoming data structure */
     uint8_t conn_val_id;                     /*!< Validation ID increased each time device connects to network */
 #endif                                       /* LWCELL_CFG_CONNS || __DOXYGEN__ */

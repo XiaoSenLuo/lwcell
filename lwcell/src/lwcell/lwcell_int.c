@@ -725,7 +725,7 @@ lwcelli_conn_closed_process(uint8_t conn_num, uint8_t forced) {
 static void
 lwcelli_parse_received(lwcell_recv_t* rcv) {
     lwcell_status_flags_t stat = {0};
-
+    uint8_t ch_off = 0;
     /* Try to remove non-parsable strings */
     if (rcv->len == 2 && rcv->data[0] == '\r' && rcv->data[1] == '\n') {
         return;
@@ -749,7 +749,22 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
             }
         }
     }
-
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP
+    if (CMD_IS_CUR(LWCELL_CMD_HTTPACTION_GET) ||
+         CMD_IS_CUR(LWCELL_CMD_HTTPACTION_POST) ||
+         CMD_IS_CUR(LWCELL_CMD_HTTPACTION_HEAD)) {
+        if(stat.is_ok){
+            stat.is_ok = 0;
+            return;
+        }
+        if(stat.is_error){
+            lwcell.msg->msg.conn_start.conn_res = LWCELL_CONN_CONNECT_ERROR;
+            return;
+        }
+    }
+#endif
+#endif
     /* Scan received strings which start with '+' */
     if (rcv->data[0] == '+') {
         if (!strncmp(rcv->data, "+CSQ", 4)) {
@@ -757,11 +772,35 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
 #if LWCELL_CFG_NETWORK
         } else if (!strncmp(rcv->data, "+PDP: DEACT", 11)) {
             /* PDP has been deactivated */
-            lwcell_network_check_status(NULL, NULL, 0); /* Update status */
+            lwcell_network_check_status(LWCELL_PDP_SOCKET, NULL, NULL, 0); /* Update status */
 #endif                                                  /* LWCELL_CFG_NETWORK */
 #if LWCELL_CFG_CONN
         } else if (!strncmp(rcv->data, "+RECEIVE", 8)) {
             lwcelli_parse_ipd(rcv->data);                                              /* Parse IPD */
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP
+        } else if (!strncmp(rcv->data, "+HTTPREAD", 9)) {
+            lwcell_parse_httpread(rcv->data);
+        } else if (!strncmp(rcv->data, "+HTTPACTION", 11)) {
+            int code = 200;
+            int dl = 0;
+            lwcell_parse_httpaction(rcv->data, &code, &dl);
+            if(code == 200){
+                stat.is_ok = 1;
+                if (CMD_IS_DEF(LWCELL_CMD_HTTPINIT)) {
+                    int cm = LWCELL_CFG_MAX_HTTP_CONNS + LWCELL_CFG_HTTP_CONN_OFFSET;
+                    lwcell_conn_t * conn = &lwcell.m.http_conns[cm - lwcell.msg->msg.conn_start.num - 1];
+                    lwcell.m.ipd.rem_len = lwcell.m.ipd.tot_len = dl;   /// 文件完整长度
+                }
+            } else {
+                stat.is_error = 1;
+            }
+#endif
+#if LWCELL_CFG_MQTT
+        } else if (!strncmp(rcv->data, "+MSUB", 9)) {
+            /// TODO: Parse +MSUB.
+#endif
+#endif
 #endif                                                                                 /* LWCELL_CFG_CONN */
         } else if (!strncmp(rcv->data, "+CREG", 5)) {                                  /* Check for +CREG indication */
             lwcelli_parse_creg(rcv->data, LWCELL_U8(CMD_IS_CUR(LWCELL_CMD_CREG_GET))); /* Parse +CREG response */
@@ -809,6 +848,25 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
         } else if (CMD_IS_CUR(LWCELL_CMD_CPBF) && !strncmp(rcv->data, "+CPBF", 5)) {
             lwcelli_parse_cpbf(rcv->data);    /* Parse +CPBR statement */
 #endif                                        /* LWCELL_CFG_PHONEBOOK */
+        } else if (!strncmp(rcv->data, "+CGMI", 5)) {
+            ch_off = 7;
+            goto parser_device_info_section;
+        } else if (!strncmp(rcv->data, "+CGMM", 5)) {
+            ch_off = 7;
+            goto parser_device_info_section;
+        } else if (!strncmp(rcv->data, "+CGMR", 5)) {
+            ch_off = 7;
+            goto parser_device_info_section;
+        } else if (!strncmp(rcv->data, "+ICCID", 6)) {
+            ch_off = 8;
+            goto parser_device_info_section;
+        } else if (!strncmp(rcv->data, "+SAPBR", 6)) {
+            /// TODO: Parse +SAPBR.
+            int s = 0;
+            lwcell_parse_sapbr(rcv->data, &s);
+            if (s == LWCELL_SAPBR_STATUS_CONNECTED) {
+
+            }
         }
 
         /* Messages not starting with '+' sign */
@@ -855,46 +913,69 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
             lwcelli_send_cb(LWCELL_EVT_SMS_READY); /* Send SMS ready event */
 #endif                                             /* LWCELL_CFG_SMS */
         } else if ((CMD_IS_CUR(LWCELL_CMD_CGMI_GET) || CMD_IS_CUR(LWCELL_CMD_CGMM_GET)
-                    || CMD_IS_CUR(LWCELL_CMD_CGSN_GET) || CMD_IS_CUR(LWCELL_CMD_CGMR_GET))
+                    || CMD_IS_CUR(LWCELL_CMD_CGSN_GET) || CMD_IS_CUR(LWCELL_CMD_CGMR_GET)
+                    || CMD_IS_CUR(LWCELL_CMD_CCID_GET) || CMD_IS_CUR(LWCELL_CMD_ICCID_GET)
+                    || CMD_IS_CUR(LWCELL_CMD_CIMI))
                    && !stat.is_ok && !stat.is_error && strncmp(rcv->data, "AT+", 3)) {
-            const char* tmp = rcv->data;
-            size_t tocopy;
-            if (CMD_IS_CUR(LWCELL_CMD_CGMI_GET)) { /* Check device manufacturer */
-                lwcelli_parse_string(&tmp, lwcell.m.model_manufacturer, sizeof(lwcell.m.model_manufacturer), 1);
-                if (CMD_IS_DEF(LWCELL_CMD_CGMI_GET)) {
-                    tocopy = LWCELL_MIN(sizeof(lwcell.m.model_manufacturer), lwcell.msg->msg.device_info.len);
-                    LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_manufacturer, tocopy);
-                    lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
-                }
-            } else if (CMD_IS_CUR(LWCELL_CMD_CGMM_GET)) { /* Check device model number */
-                lwcelli_parse_string(&tmp, lwcell.m.model_number, sizeof(lwcell.m.model_number), 1);
-                if (CMD_IS_DEF(LWCELL_CMD_CGMM_GET)) {
-                    tocopy = LWCELL_MIN(sizeof(lwcell.m.model_number), lwcell.msg->msg.device_info.len);
-                    LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_number, tocopy);
-                    lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
-                }
-                for (size_t i = 0; i < lwcell_dev_model_map_size; ++i) {
-                    if (strstr(lwcell.m.model_number, lwcell_dev_model_map[i].id_str) != NULL) {
-                        lwcell.m.model = lwcell_dev_model_map[i].model;
-                        break;
+            parser_device_info_section:
+            {
+                const char* tmp = &rcv->data[ch_off];
+                size_t tocopy;
+                if (CMD_IS_CUR(LWCELL_CMD_CGMI_GET)) { /* Check device manufacturer */
+                    lwcelli_parse_string(&tmp, lwcell.m.model_manufacturer, sizeof(lwcell.m.model_manufacturer), 1);
+                    if (CMD_IS_DEF(LWCELL_CMD_CGMI_GET)) {
+                        tocopy = LWCELL_MIN(sizeof(lwcell.m.model_manufacturer), lwcell.msg->msg.device_info.len);
+                        LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_manufacturer, tocopy);
+                        lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
                     }
-                }
-            } else if (CMD_IS_CUR(LWCELL_CMD_CGSN_GET)) { /* Check device serial number */
-                lwcelli_parse_string(&tmp, lwcell.m.model_serial_number, sizeof(lwcell.m.model_serial_number), 1);
-                if (CMD_IS_DEF(LWCELL_CMD_CGSN_GET)) {
-                    tocopy = LWCELL_MIN(sizeof(lwcell.m.model_serial_number), lwcell.msg->msg.device_info.len);
-                    LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_serial_number, tocopy);
-                    lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
-                }
-            } else if (CMD_IS_CUR(LWCELL_CMD_CGMR_GET)) { /* Check device revision */
-                if (!strncmp(tmp, "Revision:", 9)) {
-                    tmp += 9;
-                }
-                lwcelli_parse_string(&tmp, lwcell.m.model_revision, sizeof(lwcell.m.model_revision), 1);
-                if (CMD_IS_DEF(LWCELL_CMD_CGMR_GET)) {
-                    tocopy = LWCELL_MIN(sizeof(lwcell.m.model_revision), lwcell.msg->msg.device_info.len);
-                    LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_revision, tocopy);
-                    lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
+                } else if (CMD_IS_CUR(LWCELL_CMD_CGMM_GET)) { /* Check device model number */
+                    lwcelli_parse_string(&tmp, lwcell.m.model_number, sizeof(lwcell.m.model_number), 1);
+                    if (CMD_IS_DEF(LWCELL_CMD_CGMM_GET)) {
+                        tocopy = LWCELL_MIN(sizeof(lwcell.m.model_number), lwcell.msg->msg.device_info.len);
+                        LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_number, tocopy);
+                        lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
+                    }
+                    for (size_t i = 0; i < lwcell_dev_model_map_size; ++i) {
+                        if (strstr(lwcell.m.model_number, lwcell_dev_model_map[i].id_str) != NULL) {
+                            lwcell.m.model = lwcell_dev_model_map[i].model;
+                            break;
+                        }
+                    }
+                } else if (CMD_IS_CUR(LWCELL_CMD_CGSN_GET)) { /* Check device serial number */
+                    lwcelli_parse_string(&tmp, lwcell.m.model_serial_number, sizeof(lwcell.m.model_serial_number), 1);
+                    if (CMD_IS_DEF(LWCELL_CMD_CGSN_GET)) {
+                        tocopy = LWCELL_MIN(sizeof(lwcell.m.model_serial_number), lwcell.msg->msg.device_info.len);
+                        LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_serial_number, tocopy);
+                        lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
+                    }
+                } else if (CMD_IS_CUR(LWCELL_CMD_CGMR_GET)) { /* Check device revision */
+                    if (!strncmp(tmp, "Revision:", 9)) {
+                        tmp += 9;
+                    }
+                    lwcelli_parse_string(&tmp, lwcell.m.model_revision, sizeof(lwcell.m.model_revision), 1);
+                    if (CMD_IS_DEF(LWCELL_CMD_CGMR_GET)) {
+                        tocopy = LWCELL_MIN(sizeof(lwcell.m.model_revision), lwcell.msg->msg.device_info.len);
+                        LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_revision, tocopy);
+                        lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
+                    }
+                } else if (CMD_IS_CUR(LWCELL_CMD_CCID_GET) || CMD_IS_CUR(LWCELL_CMD_ICCID_GET)) { /* Check device revision */
+                    const char* tmp = &rcv->data[ch_off];
+                    size_t tocopy;
+                    lwcelli_parse_string(&tmp, lwcell.m.model_ccid, sizeof(lwcell.m.model_ccid), 1);
+                    if (CMD_IS_DEF(LWCELL_CMD_CCID_GET) || CMD_IS_DEF(LWCELL_CMD_ICCID_GET)) {
+                        tocopy = LWCELL_MIN(sizeof(lwcell.m.model_ccid), lwcell.msg->msg.device_info.len);
+                        LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_ccid, tocopy);
+                        lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
+                    }
+                } else if (CMD_IS_CUR(LWCELL_CMD_CIMI) && LWCELL_CHARISNUM(rcv->data[0])) {
+                    const char* tmp = &rcv->data[ch_off];
+                    size_t tocopy;
+                    lwcelli_parse_string(&tmp, lwcell.m.model_imsi, sizeof(lwcell.m.model_imsi), 1);
+                    if (CMD_IS_DEF(LWCELL_CMD_CCID_GET) || CMD_IS_DEF(LWCELL_CMD_ICCID_GET)) {
+                        tocopy = LWCELL_MIN(sizeof(lwcell.m.model_imsi), lwcell.msg->msg.device_info.len);
+                        LWCELL_MEMCPY(lwcell.msg->msg.device_info.str, lwcell.m.model_imsi, tocopy);
+                        lwcell.msg->msg.device_info.str[tocopy - 1] = 0;
+                    }
                 }
             }
         } else if (CMD_IS_CUR(LWCELL_CMD_CIFSR) && LWCELL_CHARISNUM(rcv->data[0])) {
@@ -907,6 +988,7 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
 
     /* Check general responses for active commands */
     if (lwcell.msg != NULL) {
+        parser_cpin_section:
         if (CMD_IS_CUR(LWCELL_CMD_CPIN_GET)) {
             /*
              * CME ERROR 10 indicates no SIM pin inserted.
@@ -919,8 +1001,8 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
                 lwcelli_send_cb(LWCELL_EVT_SIM_STATE_CHANGED);
             }
 #if LWCELL_CFG_SMS
-        } else if (CMD_IS_CUR(LWCELL_CMD_CMGS) && stat.is_ok) {
-            /* At this point we have to wait for "> " to send data */
+            } else if (CMD_IS_CUR(LWCELL_CMD_CMGS) && stat.is_ok) {
+                /* At this point we have to wait for "> " to send data */
 #endif /* LWCELL_CFG_SMS */
 #if LWCELL_CFG_CONN
         } else if (CMD_IS_CUR(LWCELL_CMD_CIPSTATUS)) {
@@ -959,7 +1041,7 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
                 uint8_t num = LWCELL_CHARTONUM(rcv->data[0]);
                 if (num < LWCELL_CFG_MAX_CONNS) {
                     uint8_t id;
-                    lwcell_conn_t* conn = &lwcell.m.conns[num]; /* Get connection handle */
+                    lwcell_conn_t *conn = &lwcell.m.conns[num]; /* Get connection handle */
 
                     if (!strncmp(&rcv->data[3], "CONNECT OK" CRLF, 10 + CRLF_LEN)) {
                         id = conn->val_id;
@@ -992,17 +1074,17 @@ lwcelli_parse_received(lwcell_recv_t* rcv) {
             lwcelli_process_cipsend_response(rcv, &stat);
 #endif /* LWCELL_CFG_CONN */
 #if LWCELL_CFG_USSD
-        } else if (CMD_IS_CUR(LWCELL_CMD_CUSD)) {
-            /* OK is returned before +CUSD */
-            /* Command is not finished yet, unless it was an ERROR */
-            if (stat.is_ok) {
-                stat.is_ok = 0;
-            }
+            } else if (CMD_IS_CUR(LWCELL_CMD_CUSD)) {
+                /* OK is returned before +CUSD */
+                /* Command is not finished yet, unless it was an ERROR */
+                if (stat.is_ok) {
+                    stat.is_ok = 0;
+                }
 
-            /* Check for manual CUSTOM OK message */
-            if (!strcmp(rcv->data, "CUSTOM_OK\r\n")) {
-                stat.is_ok = 1;
-            }
+                /* Check for manual CUSTOM OK message */
+                if (!strcmp(rcv->data, "CUSTOM_OK\r\n")) {
+                    stat.is_ok = 1;
+                }
 #endif /* LWCELL_CFG_USSD */
         }
     }
@@ -1405,12 +1487,15 @@ lwcelli_process_sub_cmd(lwcell_msg_t* msg, lwcell_status_flags_t* stat) {
                 break;
             }
             case LWCELL_CMD_ATE0:
-            case LWCELL_CMD_ATE1: SET_NEW_CMD(LWCELL_CMD_CFUN_SET); break;     /* Set full functionality */
+            case LWCELL_CMD_ATE1: SET_NEW_CMD(LWCELL_CMD_CPIN_GET); break; /* Get SIM state */
+            case LWCELL_CMD_CPIN_GET: SET_NEW_CMD(LWCELL_CMD_CFUN_SET); break; /* Set full functionality */
             case LWCELL_CMD_CFUN_SET: SET_NEW_CMD(LWCELL_CMD_CMEE_SET); break; /* Set detailed error reporting */
             case LWCELL_CMD_CMEE_SET: SET_NEW_CMD(LWCELL_CMD_CGMI_GET); break; /* Get manufacturer */
             case LWCELL_CMD_CGMI_GET: SET_NEW_CMD(LWCELL_CMD_CGMM_GET); break; /* Get model */
             case LWCELL_CMD_CGMM_GET: SET_NEW_CMD(LWCELL_CMD_CGSN_GET); break; /* Get product serial number */
-            case LWCELL_CMD_CGSN_GET: SET_NEW_CMD(LWCELL_CMD_CGMR_GET); break; /* Get product revision */
+            case LWCELL_CMD_CGSN_GET: SET_NEW_CMD(LWCELL_CMD_CCID_GET); break;
+            case LWCELL_CMD_CCID_GET: SET_NEW_CMD(LWCELL_CMD_CIMI); break;
+            case LWCELL_CMD_CIMI: SET_NEW_CMD(LWCELL_CMD_CGMR_GET); break; /* Get product revision */
             case LWCELL_CMD_CGMR_GET: {
                 /*
                  * At this point we have modem info.
@@ -1422,9 +1507,11 @@ lwcelli_process_sub_cmd(lwcell_msg_t* msg, lwcell_status_flags_t* stat) {
                 SET_NEW_CMD(LWCELL_CMD_CREG_SET); /* Enable unsolicited code for CREG */
                 break;
             }
-            case LWCELL_CMD_CREG_SET: SET_NEW_CMD(LWCELL_CMD_CLCC_SET); break; /* Set call state */
-            case LWCELL_CMD_CLCC_SET: SET_NEW_CMD(LWCELL_CMD_CPIN_GET); break; /* Get SIM state */
-            case LWCELL_CMD_CPIN_GET: break;
+            case LWCELL_CMD_CREG_SET:
+            {
+                if(lwcell.m.model != LWCELL_DEVICE_MODEL_AIR724x) SET_NEW_CMD(LWCELL_CMD_CLCC_SET); break;
+            } /* Set call state */
+            case LWCELL_CMD_CLCC_SET:
             default: break;
         }
 
@@ -1603,33 +1690,52 @@ lwcelli_process_sub_cmd(lwcell_msg_t* msg, lwcell_status_flags_t* stat) {
 #endif /* LWCELL_CFG_PHONEBOOK */
 #if LWCELL_CFG_NETWORK
     } else if (CMD_IS_DEF(LWCELL_CMD_NETWORK_ATTACH)) {
-        switch (msg->i) {
-            case 0: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CGACT_SET_0); break;
-            case 1: SET_NEW_CMD(LWCELL_CMD_CGACT_SET_1); break;
+        if (msg->msg.network_attach.pdp.type == LWCELL_PDP_SOCKET) {
+            switch (msg->i) {
+                case 0: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CGACT_SET_0); break;
+                case 1: SET_NEW_CMD(LWCELL_CMD_CGACT_SET_1); break;
 #if LWCELL_CFG_NETWORK_IGNORE_CGACT_RESULT
-            case 2: SET_NEW_CMD(LWCELL_CMD_CGATT_SET_0); break;
+                    case 2: SET_NEW_CMD(LWCELL_CMD_CGATT_SET_0); break;
 #else  /* LWCELL_CFG_NETWORK_IGNORE_CGACT_RESULT */
-            case 2: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CGATT_SET_0); break;
+                case 2: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CGATT_SET_0); break;
 #endif /* !LWCELL_CFG_NETWORK_IGNORE_CGACT_RESULT */
-            case 3: SET_NEW_CMD(LWCELL_CMD_CGATT_SET_1); break;
-            case 4: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIPSHUT); break;
-            case 5: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIPMUX_SET); break;
-            case 6: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIPRXGET_SET); break;
-            case 7: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CSTT_SET); break;
-            case 8: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIICR); break;
-            case 9: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIFSR); break;
-            case 10: SET_NEW_CMD(LWCELL_CMD_CIPSTATUS); break;
-            default: break;
+                case 3: SET_NEW_CMD(LWCELL_CMD_CGATT_SET_1); break;
+                case 4: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIPSHUT); break;
+                case 5: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIPMUX_SET); break;
+                case 6: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIPRXGET_SET); break;
+                case 7: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CSTT_SET); break;
+                case 8: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIICR); break;
+                case 9: SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CIFSR); break;
+                case 10: { SET_NEW_CMD(LWCELL_CMD_CIPSTATUS); break; }
+                default: break;
+            }
+        } else if (msg->msg.network_attach.pdp.type == LWCELL_PDP_APP_PROTOCOL) {
+            switch (msg->i) {
+                case 0: {SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_CGATT_SET_1); break;}
+                case 1: {SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_SAPBR_CONTYPE_GPRS_SET); break;}
+                case 2: {SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_SAPBR_APN_SET); break;}
+                case 3: {SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_SAPBR_OPEN); break;}
+                case 4: {SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_SAPBR_QUERY); break;}
+                default: break;
+            }
         }
     } else if (CMD_IS_DEF(LWCELL_CMD_NETWORK_DETACH)) {
-        switch (msg->i) {
-            case 0: SET_NEW_CMD(LWCELL_CMD_CGATT_SET_0); break;
-            case 1: SET_NEW_CMD(LWCELL_CMD_CGACT_SET_0); break;
+        if (msg->msg.network_attach.pdp.type == LWCELL_PDP_SOCKET) {
+            switch (msg->i) {
+                case 0: SET_NEW_CMD(LWCELL_CMD_CGATT_SET_0); break;
+                case 1: SET_NEW_CMD(LWCELL_CMD_CGACT_SET_0); break;
 #if LWCELL_CFG_CONN
-            case 2: SET_NEW_CMD(LWCELL_CMD_CIPSTATUS); break;
+                case 2: SET_NEW_CMD(LWCELL_CMD_CIPSTATUS); break;
 #endif /* LWCELL_CFG_CONN */
-            default: break;
+                default: break;
+            }
+        } else if (msg->msg.network_attach.pdp.type == LWCELL_PDP_APP_PROTOCOL) {
+            switch (msg->i) {
+                case 0: {SET_NEW_CMD(LWCELL_CMD_SAPBR_CLOSE); break;}
+                default: break;
+            }
         }
+
         if (!n_cmd) {
             stat->is_ok = 1;
         }
@@ -1641,13 +1747,19 @@ lwcelli_process_sub_cmd(lwcell_msg_t* msg, lwcell_status_flags_t* stat) {
                 SET_NEW_CMD(LWCELL_CMD_CIPSSL);            /* Set SSL */
             }
         } else if (msg->i == 1 && CMD_IS_CUR(LWCELL_CMD_CIPSSL)) {
+#if(0)
+            SET_NEW_CMD(LWCELL_CMD_CIPTKA);
+        } else if (msg->i == 2 && CMD_IS_CUR(LWCELL_CMD_CIPTKA)) {
+#endif
             SET_NEW_CMD(LWCELL_CMD_CIPSTART);  /* Now actually start connection */
         } else if (msg->i == 2 && CMD_IS_CUR(LWCELL_CMD_CIPSTART)) {
+#if(0)
             SET_NEW_CMD(LWCELL_CMD_CIPSTATUS); /* Go to status mode */
             if (stat->is_error) {
                 msg->msg.conn_start.conn_res = LWCELL_CONN_CONNECT_ERROR;
             }
         } else if (msg->i == 3 && CMD_IS_CUR(LWCELL_CMD_CIPSTATUS)) {
+#endif
             /* After second CIP status, define what to do next */
             switch (msg->msg.conn_start.conn_res) {
                 case LWCELL_CONN_CONNECT_OK: {                                      /* Successfully connected */
@@ -1689,9 +1801,66 @@ lwcelli_process_sub_cmd(lwcell_msg_t* msg, lwcell_status_flags_t* stat) {
             lwcell.evt.evt.conn_active_close.forced = 1;
             lwcell.evt.evt.conn_active_close.res = lwcellERR;
             lwcell.evt.evt.conn_active_close.client =
-                msg->msg.conn_close.conn->status.f.active && msg->msg.conn_close.conn->status.f.client;
+                    msg->msg.conn_close.conn->status.f.active && msg->msg.conn_close.conn->status.f.client;
             lwcelli_send_conn_cb(msg->msg.conn_close.conn, NULL);
         }
+#if LWCELL_CFG_PROTOCOL
+#if LWCELL_CFG_HTTP
+    } else if (CMD_IS_DEF(LWCELL_CMD_HTTPINIT)) {
+        /// TODO: 实现 HTTP 连接流程
+        if (!msg->i && CMD_IS_CUR(LWCELL_CMD_SAPBR_QUERY)) {
+            if (stat->is_ok) {
+                SET_NEW_CMD(LWCELL_CMD_HTTPINIT);
+            }
+        } else if ((msg->i == 1) && CMD_IS_CUR(LWCELL_CMD_HTTPINIT)) {
+            SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPPARA_CID);
+        } else if ((msg->i == 2) && CMD_IS_CUR(LWCELL_CMD_HTTPPARA_CID)) {
+            SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPPARA_URL);
+        } else if ((msg->i == 3) && CMD_IS_CUR(LWCELL_CMD_HTTPPARA_URL)) {
+            int cm = LWCELL_CFG_HTTP_CONN_OFFSET + LWCELL_CFG_MAX_HTTP_CONNS;
+            lwcell_conn_t *hc = &lwcell.m.http_conns[cm - lwcell.msg->msg.conn_start.num - 1];
+            if (hc->http_method == LWCELL_HTTP_METHOD_GET) {
+                SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPACTION_GET);
+            } else if (hc->http_method == LWCELL_HTTP_METHOD_POST) {
+                SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPACTION_POST);
+            } else if (hc->http_method == LWCELL_HTTP_METHOD_HEAD) {
+                SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPACTION_HEAD);
+            }
+#if(0)
+        } else if (msg->i == 4) {
+            switch (CMD_GET_CUR()) {
+                case LWCELL_CMD_HTTPACTION_GET:
+                case LWCELL_CMD_HTTPACTION_HEAD: {
+                    SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPREAD);
+                    break;
+                }
+                case LWCELL_CMD_HTTPACTION_POST: {
+                    SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPDATA);
+                    break;
+                }
+                default:
+                    break;
+            }
+        } else if ((msg->i == 5) || (msg->i == 6)) {
+            switch (CMD_GET_CUR()) {
+                case LWCELL_CMD_HTTPACTION_HEAD: {
+                    SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPACTION_GET);
+                    break;
+                }
+                case LWCELL_CMD_HTTPACTION_GET: {
+                    SET_NEW_CMD_CHECK_ERROR(LWCELL_CMD_HTTPTERM);
+                    break;
+                }
+                default:
+                    break;
+            }
+#endif
+        }
+    } else if (CMD_IS_DEF(LWCELL_CMD_HTTPTERM)) {
+
+
+#endif
+#endif
 #endif /* LWCELL_CFG_CONN */
 #if LWCELL_CFG_USSD
     } else if (CMD_IS_DEF(LWCELL_CMD_CUSD)) {
@@ -1733,7 +1902,7 @@ lwcelli_initiate_cmd(lwcell_msg_t* msg) {
         case LWCELL_CMD_RESET: { /* Reset modem with AT commands */
             /* Try with hardware reset */
             if (lwcell.ll.reset_fn != NULL && lwcell.ll.reset_fn(1)) {
-                lwcell_delay(2);
+                lwcell_delay(20);
                 lwcell.ll.reset_fn(0);
                 lwcell_delay(500);
             }
@@ -1910,6 +2079,24 @@ lwcelli_initiate_cmd(lwcell_msg_t* msg) {
             AT_PORT_SEND_END_AT();
             break;
         }
+        case LWCELL_CMD_CIMI: { /* Request International Mobile Subscriber Identity */
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+CIMI");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_CCID_GET: { /* Request International Circuit Card Identity */
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+CCID");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_ICCID_GET: { /* Request International Circuit Card Identity */
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+ICCID");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
 #if LWCELL_CFG_CONN
         case LWCELL_CMD_CIPMUX: { /* Enable multiple connections */
             AT_PORT_SEND_BEGIN_AT();
@@ -1933,6 +2120,14 @@ lwcelli_initiate_cmd(lwcell_msg_t* msg) {
             AT_PORT_SEND_BEGIN_AT();
             AT_PORT_SEND_CONST_STR("+CIPSSL=");
             lwcelli_send_number((msg->msg.conn_start.type == LWCELL_CONN_TYPE_SSL) ? 1 : 0, 0, 0);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_CIPTKA: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+CIPTKA=");
+            lwcelli_send_number(1, 0, 0);
+//            lwcelli_send_number(120, 0, 1);
             AT_PORT_SEND_END_AT();
             break;
         }
@@ -2239,6 +2434,195 @@ lwcelli_initiate_cmd(lwcell_msg_t* msg) {
             AT_PORT_SEND_END_AT();
             break;
         }
+            /// TODO: 应用层协议配置
+#if LWCELL_CFG_PROTOCOL
+        case LWCELL_CMD_SAPBR_CLOSE: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+SAPBR=0,1");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_SAPBR_OPEN: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+SAPBR=1,1");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_SAPBR_QUERY: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+SAPBR=2,1");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_SAPBR_CONTYPE_GPRS_SET: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+SAPBR=3,1,\"CONTYPE\",\"GPRS\"");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_SAPBR_APN_SET: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+SAPBR=3,1,\"APN\",\"\"");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_SAPBR_GET: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+SAPBR=4,1");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+#if LWCELL_CFG_HTTP
+        case LWCELL_CMD_HTTPINIT: {
+            lwcell_conn_t *c = NULL;
+            msg->msg.conn_start.num = LWCELL_CFG_HTTP_CONN_OFFSET;
+            int16_t cm = LWCELL_CFG_HTTP_CONN_OFFSET + LWCELL_CFG_MAX_HTTP_CONNS;
+            for(int16_t i = cm - 1; i >= LWCELL_CFG_HTTP_CONN_OFFSET; --i){
+                if(!lwcell.m.conns[i].status.f.active){
+                    c = &lwcell.m.conns[i];
+                    c->num = LWCELL_U8(i);
+                    msg->msg.conn_start.num = LWCELL_U8(i);
+                    break;
+                }
+            }
+            if(c == NULL){
+                lwcelli_send_conn_error_cb(msg, lwcellERRNOFREECONN);
+                return lwcellERRNOFREECONN;
+            }
+            if(msg->msg.conn_start.conn != NULL){
+                *msg->msg.conn_start.conn = c;
+            }
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPINIT");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPSSL_SET_0: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPSSL=0");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPSSL_SET_1: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPSSL=1");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPPARA_CID: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("CID", 0, 1, 0);
+            lwcelli_send_number(msg->msg.network_attach.pdp.id, 0, 1);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPPARA_URL: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("URL", 0, 1, 0);
+            AT_PORT_SEND_COMMA_COND(1);
+            AT_PORT_SEND_QUOTE_COND(1);
+            lwcelli_send_string(msg->msg.conn_start.host, 1, 0, 0);
+            if(msg->msg.conn_start.port != 80){
+                lwcelli_send_string(":", 0, 0, 0);
+                lwcelli_send_number(msg->msg.conn_start.port, 0, 0);
+            }
+            AT_PORT_SEND_QUOTE_COND(1);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+#if(0)
+        case LWCELL_CMD_HTTPPARA_PROIP: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("PROIP", 0, 1, 0);
+            lwcelli_send_ip_mac(NULL, 1, 1, 1);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPPARA_PROPORT: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("PROPORT", 0, 1, 0);
+            lwcelli_send_number(0, 0, 0);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+#endif
+        case LWCELL_CMD_HTTPPARA_BREAK: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("BREAK", 0, 1, 0);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPPARA_BREAKEND: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("BREAKEND", 0, 1, 0);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPPARA_USER_DEFINED: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("USER_DEFINED", 0, 1, 0);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPPARA_USERDATA: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPPARA=");
+            lwcelli_send_string("USERDATA", 0, 1, 0);
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPACTION_GET: {
+
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPACTION=0");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPACTION_POST: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPACTION=1");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPACTION_HEAD: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPACTION=2");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPREAD: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPREAD");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPHEAD: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPHEAD");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPSCONT: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPSCONT");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+        case LWCELL_CMD_HTTPTERM: {
+            AT_PORT_SEND_BEGIN_AT();
+            AT_PORT_SEND_CONST_STR("+HTTPTERM");
+            AT_PORT_SEND_END_AT();
+            break;
+        }
+#endif
+#endif
 #endif /* LWCELL_CFG_NETWORK */
 #if LWCELL_CFG_USSD
         case LWCELL_CMD_CUSD_GET: {
