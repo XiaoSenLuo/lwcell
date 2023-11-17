@@ -3,8 +3,8 @@
 #include "lwcell/lwcell_network_api.h"
 
 /* Host parameter */
-#define CONN_HOST           "example.com"
-#define CONN_PORT           80
+#define CONN_HOST           "tcpbin.com"
+#define CONN_PORT           4242
 
 static lwcellr_t   conn_callback_func(lwcell_evt_t* evt);
 

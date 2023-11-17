@@ -23,8 +23,8 @@ static const lwcell_mqtt_client_info_t mqtt_client_info = {
     .keep_alive = 10,
 
     /* Server login data */
-    .user = "8a215f70-a644-11e8-ac49-e932ed599553",
-    .pass = "26aa943f702e5e780f015cd048a91e8fb54cca28",
+    .user = "chengyi",
+    .pass = "cy66874",
 
     /* Device identifier address */
     .id = "2c3573a0-0176-11e9-a056-c5cffe7f75f9",
@@ -74,7 +74,7 @@ mqtt_client_api_thread(void const* arg) {
         printf("Joining MQTT server\r\n");
 
         /* Try to join */
-        conn_status = lwcell_mqtt_client_api_connect(client, "mqtt.mydevices.com", 1883, &mqtt_client_info);
+        conn_status = lwcell_mqtt_client_api_connect(client, "8.134.90.207", 1883, &mqtt_client_info);
         if (conn_status == LWCELL_MQTT_CONN_STATUS_ACCEPTED) {
             printf("Connected and accepted!\r\n");
             printf("Client is ready to subscribe and publish to new messages\r\n");
@@ -94,7 +94,7 @@ mqtt_client_api_thread(void const* arg) {
 
         while (1) {
             /* Receive MQTT packet with timeout */
-            if ((res = lwcell_mqtt_client_api_receive(client, &buf, 5000)) == lwcellOK) {
+            if ((res = lwcell_mqtt_client_api_receive(client, &buf, 50000)) == lwcellOK) {
                 if (buf != NULL) {
                     printf("Publish received!\r\n");
                     printf("Topic: %s, payload: %s\r\n", buf->topic, buf->payload);

@@ -7,8 +7,8 @@
 /**
  * \brief           Host and port settings
  */
-#define NETCONN_HOST "example.com"
-#define NETCONN_PORT 80
+#define NETCONN_HOST "112.125.89.8"
+#define NETCONN_PORT 43156
 
 /**
  * \brief           Request header to send on successful connection
@@ -116,7 +116,8 @@ netconn_client_thread(void const* arg) {
     if (lwcell_sys_sem_isvalid(sem)) {
         lwcell_sys_sem_release(sem);
     }
-    lwcell_sys_thread_terminate(NULL); /* Terminate current thread */
+//    lwcell_sys_thread_terminate(NULL); /* Terminate current thread */
+    vTaskDelete(NULL);
 }
 
 #endif /* LWCELL_CFG_NETCONN */
