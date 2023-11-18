@@ -34,8 +34,7 @@
 #ifndef LWCELL_HTTP_HDR_H
 #define LWCELL_HTTP_HDR_H
 
-#include "lwcell/lwcell_types.h"
-#include "lwcell/lwcell_netconn.h"
+#include "lwcell/lwcell_includes.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,6 +49,87 @@ extern "C" {
  * Currently it is under development
  *
  */
+
+struct lwcell_http_client;
+
+typedef struct lwcell_http_client * lwcell_http_client_p;
+
+typedef enum {
+    LWCELL_HTTP_CONN_DISCONNECTED = 0x00,
+    LWCELL_HTTP_CONN_CONNECTING,
+    LWCELL_HTTP_CONN_DISCONNECTING,
+    LWCELL_HTTP_CONNECTING,
+    LWCELL_HTTP_CONNECTED,
+}lwcell_http_state_t;
+
+
+typedef struct {
+    uint8_t method;
+    uint8_t type;
+    uint16_t status;
+
+    void *arg;
+
+    union {
+        uint32_t post_sent_len;
+        uint32_t get_recv_len;
+        uint32_t head_recv_len;
+    };
+
+    uint32_t timeout_start_time;
+}lwcell_http_request_t;
+
+
+typedef enum {
+    LWCELL_HTTP_EVT_CONNECT,
+    LWCELL_HTTP_EVT_SEND_COMPLETE,
+    LWCELL_HTTP_EVT_READ_BREAD,
+    LWCELL_HTTP_EVT_READ_COMPLETE,
+    LWCELL_HTTP_EVT_DISCONNECT,
+    LWCELL_HTTP_EVT_KEEP_ALIVE,
+}lwcell_http_evt_type_t;
+
+
+typedef enum {
+    LWCELL_HTTP_CONN_STATUS_ACCEPTED = 0x00,
+
+    LWCELL_HTTP_CONN_STATUS_TCP_FAILED = 0x100,
+}lwcell_http_conn_status_t;
+
+
+typedef struct {
+    lwcell_http_evt_type_t type;
+
+    union {
+        struct {
+            lwcell_http_conn_status_t status;
+        }connect;
+        struct {
+            uint8_t is_accepted;
+        }disconnect;
+        struct {
+            void *arg;
+            lwcellr_t res;
+        }post;
+        struct {
+            void *arg;
+            lwcellr_t res;
+        }get;
+        struct {
+            void *arg;
+            lwcellr_t res;
+        }head;
+
+        struct {
+            uint8_t is_break;
+            uint32_t body_len;
+            uint32_t recv_len;
+            const void *data;
+        }recv;
+    }evt;
+}lwcell_http_evt_t;
+
+typedef void (*lwcell_http_evt_fn)(lwcell_http_client_p client, lwcell_http_evt_t* evt);
 
 
 typedef struct lwcell_netconn* lwcell_httpconn_p;
@@ -71,20 +151,14 @@ lwcellr_t lwcell_http_request_attach(void);
 lwcellr_t lwcell_http_request_detach(void);
 
 
-lwcell_httpconn_p lwcell_http_new(lwcell_httpconn_type_t type);
-lwcellr_t lwcell_http_delete(lwcell_httpconn_p nc);
-lwcellr_t lwcell_http_connect(lwcell_httpconn_p nc, const char* host, lwcell_port_t port);
-lwcellr_t lwcell_http_receive(lwcell_httpconn_p nc, lwcell_pbuf_p* pbuf);
-lwcellr_t lwcell_http_close(lwcell_httpconn_p nc);
-int8_t lwcell_http_getconnnum(lwcell_httpconn_p nc);
-void lwcell_http_set_receive_timeout(lwcell_httpconn_p nc, uint32_t timeout);
-uint32_t lwcell_http_get_receive_timeout(lwcell_httpconn_p nc);
+lwcell_http_client_p lwcell_http_client_new (lwcell_httpconn_type_t type, size_t tx_buff_len, size_t rx_buff_len);
+lwcellr_t lwcell_http_client_delete(lwcell_http_client_p client);
+lwcell_http_conn_status_t lwcell_http_client_connect(lwcell_http_client_p client, const char* host, lwcell_port_t port);
+uint8_t lwcell_http_client_is_connected(lwcell_http_client_p client);
+lwcellr_t lwcell_http_client_receive (lwcell_http_client_p client, lwcell_pbuf_p *pbuf, uint32_t timeout);
+lwcellr_t lwcell_http_client_close(lwcell_http_client_p client);
 
-
-lwcellr_t lwcell_http_write(lwcell_httpconn_p nc, const void* data, size_t btw);
-lwcellr_t lwcell_http_write_ex(lwcell_httpconn_p nc, const void* data, size_t btw, uint16_t flags);
-lwcellr_t lwcell_http_flush(lwcell_httpconn_p nc);
-
+lwcellr_t lwcell_http_client_write(lwcell_http_client_p client, const void* data, size_t btw);
 
 
 /**
