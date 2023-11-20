@@ -256,8 +256,9 @@
 #ifndef LWCELL_CFG_DBG_OUT
 #define LWCELL_CFG_DBG_OUT(fmt, ...)      \
     do {                                \
-        extern int printf_(const char* format, ...);   \
-        printf_("%s:""%d:"fmt, __FILE__, __LINE__, ##__VA_ARGS__);   \
+        extern int printf_(const char* format, ...); \
+        extern char * strrchr ( const char *, int ); \
+        printf_("%s:""%d:"fmt, (const char *)(strrchr(__FILE__, '/') + 1), __LINE__, ##__VA_ARGS__);   \
     } while (0)
 #endif
 
